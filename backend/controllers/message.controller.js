@@ -66,6 +66,7 @@ export const getInbox = async (req, res) => {
 };
 
 // ✅ Obtener todos los mensajes entre dos usuarios
+// ✅ Obtener todos los mensajes entre dos usuarios
 export const getMessages = async (req, res) => {
   try {
     const userA = req.user.id;
@@ -76,13 +77,27 @@ export const getMessages = async (req, res) => {
     const messages = await Message.find({ conversationId })
       .sort("createdAt")
       .populate("sender", "username profilePic")
-      .populate("receiver", "username profilePic"); // ✨ añadimos receiver también
+      .populate("receiver", "username profilePic");
 
-    res.status(200).json(messages);
+    const transformedMessages = messages.map((msg) => ({
+      _id: msg._id,
+      text: msg.text,
+      from: msg.sender._id,
+      to: msg.receiver._id,
+      sender: msg.sender.username,
+      receiver: msg.receiver.username,
+      fromAvatar: msg.sender.profilePic,
+      toAvatar: msg.receiver.profilePic,
+      timestamp: msg.createdAt,
+      isRead: msg.isRead || false,
+    }));
+
+    res.status(200).json(transformedMessages);
   } catch (error) {
     console.error("getMessages error:", error);
     res.status(500).json({ error: "Failed to fetch messages." });
   }
 };
+
 
 

@@ -1,4 +1,4 @@
-// models/conversation.model.js
+// backend/models/conversation.model.js
 import mongoose from "mongoose";
 
 const conversationSchema = new mongoose.Schema(
@@ -10,10 +10,20 @@ const conversationSchema = new mongoose.Schema(
         required: true,
       },
     ],
+
+    // 🆕 Guardamos el hilo completo de mensajes en esta conversación
+    messages: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Message",
+      },
+    ],
+
     lastMessage: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Message",
     },
+
     updatedAt: {
       type: Date,
       default: Date.now,
@@ -22,7 +32,8 @@ const conversationSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-conversationSchema.index({ participants: 1 }); // for faster lookup
+// Índice para búsquedas rápidas por participantes
+conversationSchema.index({ participants: 1 });
 
 const Conversation = mongoose.model("Conversation", conversationSchema);
 export default Conversation;

@@ -1,3 +1,5 @@
+// backend/Routes/message.routes.js
+
 import express from "express";
 import {
   sendMessage,
@@ -10,6 +12,8 @@ const router = express.Router();
 
 router.post("/send", verifyToken, sendMessage);
 router.get("/inbox", verifyToken, getInbox);
-router.get("/chat/:userId", verifyToken, getMessages);// 👈 esta es la que se activa en /msg/:userId
+// Cambiamos de "/chat/:userId" a "/:userId"
+- router.get("/chat/:userId", verifyToken, getMessages);
++ router.get("/:userId", verifyToken, getMessages);
 
 export default router;
