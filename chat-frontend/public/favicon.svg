@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Terminal chat">
+  <title>Terminal chat</title>
+  <rect width="32" height="32" rx="5" fill="#1a1a1a"/>
+  <g fill="none" stroke="#e8e8e0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <!-- prompt > -->
+    <path d="M7 9l6 7-6 7"/>
+    <!-- message lines -->
+    <path d="M16 11h11M16 16h9M16 21h7"/>
+  </g>
+  <!-- subtle cursor block -->
+  <rect x="25" y="18" width="2" height="5" fill="#e8e8e0" rx="0.5"/>
+</svg>

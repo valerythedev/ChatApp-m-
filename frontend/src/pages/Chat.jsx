@@ -21,9 +21,14 @@ function Chat() {
     if (stored) {
       try {
         const parsed = JSON.parse(stored);
-        console.log("✅ User from localStorage:", parsed);
-        setUser({ ...parsed, id: parsed.id || parsed._id });
-        socket.emit("join", parsed);
+        const fullUser = {
+          id: parsed.id || parsed._id,
+          username: parsed.username,
+          profilePic: parsed.profilePic || null,
+        };
+        setUser(fullUser);
+        console.log("🔐 Enviando user a join:", fullUser);
+        socket.emit("join", fullUser);
       } catch (err) {
         console.error("❌ Error parsing user:", err);
       }
@@ -34,7 +39,6 @@ function Chat() {
     socket.on("users", (usersOnline) => {
       setOnlineUsers(usersOnline);
     });
-
     return () => {
       socket.off("users");
     };
@@ -84,6 +88,7 @@ function Chat() {
 
   useEffect(() => {
     const handleRead = ({ from }) => {
+      console.log("📩 mensajes leídos desde:", from);
       setAllMessages((prev) => {
         const updated = (prev[from] || []).map((msg) =>
           msg.to === userId ? { ...msg, isRead: true } : msg
@@ -93,22 +98,17 @@ function Chat() {
     };
 
     socket.on("messagesRead", handleRead);
-
-    return () => {
-      socket.off("messagesRead", handleRead);
-    };
+    return () => socket.off("messagesRead", handleRead);
   }, [userId]);
 
   useEffect(() => {
     const fetchHistory = async () => {
       if (!user || !selectedUser) return;
-
       try {
         const token = localStorage.getItem("token");
         const res = await axios.get(`http://localhost:5550/api/msg/${selectedUser._id}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-
         setAllMessages((prev) => ({
           ...prev,
           [selectedUser._id]: res.data,
@@ -178,6 +178,13 @@ function Chat() {
         <div className="border border-gray-700 rounded p-4 h-[400px] overflow-y-auto bg-neutral-800/80 mb-4 flex flex-col">
           {messages.map((msg, i) => {
             const isMine = String(msg.from) === String(userId);
+            const lastMyMessageIndex = [...messages]
+              .map((m, idx) => ({ from: m.from, idx }))
+              .reverse()
+              .find((m) => String(m.from) === String(userId))?.idx;
+
+            const isLastMine = i === lastMyMessageIndex;
+
             const time =
               msg.timestamp && !isNaN(new Date(msg.timestamp).getTime())
                 ? format(new Date(msg.timestamp), "hh:mm a")
@@ -199,14 +206,14 @@ function Chat() {
                   {msg.text}
                 </div>
                 {time && (
-                  <span className="text-xs text-gray-400 mt-1">
+                  <div className="text-xs text-gray-400 mt-1">
                     {time}
-                    {isMine && i === messages.length - 1 && (
-                      <span className="ml-2 text-green-400">
-                        {msg.isRead ? "✓✓" : "✓"}
+                    {isLastMine && (
+                      <span className="ml-2 italic text-[11px] text-gray-400">
+                        {msg.isRead ? "Leído" : "Enviado"}
                       </span>
                     )}
-                  </span>
+                  </div>
                 )}
               </div>
             );

@@ -1,0 +1,75 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id           String   @id @default(uuid())
+  username     String   @unique
+  email        String   @unique
+  passwordHash String
+  avatarUrl    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sentMessages      Message[]          @relation("SentMessages")
+  conversationUsers ConversationUser[]
+  contactsOwned     UserContact[]      @relation("ContactOwner")
+  contactsOf        UserContact[]      @relation("ContactPeer")
+}
+
+/// People you added; only these users appear in People and can receive your new messages.
+model UserContact {
+  ownerId   String
+  contactId String
+  createdAt DateTime @default(now())
+
+  owner   User @relation("ContactOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  contact User @relation("ContactPeer", fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@id([ownerId, contactId])
+  @@index([ownerId])
+  @@index([contactId])
+}
+
+model Conversation {
+  id         String    @id @default(uuid())
+  isArchived Boolean   @default(false)
+  archivedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  users    ConversationUser[]
+  messages Message[]
+}
+
+model ConversationUser {
+  userId         String
+  conversationId String
+  joinedAt       DateTime @default(now())
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@id([userId, conversationId])
+}
+
+model Message {
+  id             String    @id @default(uuid())
+  conversationId String
+  senderId       String
+  body           String?
+  mediaUrl       String?
+  mediaType      String?
+  fileName       String?
+  isDeleted      Boolean   @default(false)
+  sentAt         DateTime  @default(now())
+  readAt         DateTime?
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User         @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+}

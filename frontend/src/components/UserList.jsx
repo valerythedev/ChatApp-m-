@@ -4,14 +4,23 @@ import axios from "axios";
 function UserList({ onSelect, selectedUserId, onlineUsers = [] }) {
   const [users, setUsers] = useState([]);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState(null);
 
   useEffect(() => {
     const fetchUsers = async () => {
       try {
         const token = localStorage.getItem("token");
+        const storedUser = localStorage.getItem("user");
+
+        if (storedUser) {
+          const parsed = JSON.parse(storedUser);
+          setCurrentUserId(parsed._id || parsed.id);
+        }
+
         const res = await axios.get("http://localhost:5550/api/auth/users", {
           headers: { Authorization: `Bearer ${token}` },
         });
+
         setUsers(res.data);
       } catch (err) {
         console.error("❌ Error fetching users:", err.response?.data || err.message);
@@ -29,9 +38,10 @@ function UserList({ onSelect, selectedUserId, onlineUsers = [] }) {
     }, 300);
   };
 
-  const isOnline = (userId) => {
-    return onlineUsers.some((u) => u.id === userId || u._id === userId);
-  };
+const isOnline = (userId) => {
+  return onlineUsers.some((u) => String(u.id) === String(userId));
+};
+
 
   return (
     <aside className="flex">
@@ -48,43 +58,55 @@ function UserList({ onSelect, selectedUserId, onlineUsers = [] }) {
           <h2 className="px-5 text-lg font-medium text-zinc-800 dark:text-white">Users</h2>
 
           <div className="mt-6 space-y-2 px-2">
-            {users.map((user) => {
-              const isSelected = user._id === selectedUserId;
-              const online = isOnline(user._id);
+            {users
+              .filter((user) => String(user._id) !== String(currentUserId)) // optional: avoid showing self
+              .map((user) => {
+                const isSelected = String(user._id) === String(selectedUserId);
+                const online = isOnline(user._id);
 
-              return (
-                <button
-                  key={user._id}
-                  onClick={() => onSelect(user)}
-                  className={`flex items-center w-full px-3 py-2 gap-x-2 rounded transition-colors ${
-                    isSelected
-                      ? "bg-zinc-200 dark:bg-zinc-800"
-                      : "hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                  }`}
-                >
-                  {user.profilePic ? (
-                    <img
-                      className="object-cover w-8 h-8 rounded-full"
-                      src={user.profilePic}
-                      alt={user.username}
-                    />
-                  ) : (
-                    <div className="object-cover w-8 h-8 rounded-full bg-zinc-600 flex items-center justify-center text-sm text-white">
-                      {user.username.slice(0, 2).toUpperCase()}
+                return (
+                  <button
+                    key={user._id}
+                    onClick={() =>
+                      onSelect({
+                        ...user,
+                        _id: user._id || user.id,
+                        id: user.id || user._id,
+                      })
+                    }
+                    className={`flex items-center w-full px-3 py-2 gap-x-2 rounded transition-colors ${
+                      isSelected
+                        ? "bg-zinc-200 dark:bg-zinc-800"
+                        : "hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                    }`}
+                  >
+                    {user.profilePic ? (
+                      <img
+                        className="object-cover w-8 h-8 rounded-full"
+                        src={user.profilePic}
+                        alt={user.username}
+                      />
+                    ) : (
+                      <div className="object-cover w-8 h-8 rounded-full bg-zinc-600 flex items-center justify-center text-sm text-white">
+                        {user.username.slice(0, 2).toUpperCase()}
+                      </div>
+                    )}
+
+                    <div className="text-left">
+                      <h1 className="text-sm font-medium text-zinc-700 capitalize dark:text-white">
+                        {user.username}
+                      </h1>
+                      <p
+                        className={`text-xs ${
+                          online ? "text-green-500" : "text-zinc-500"
+                        } dark:text-zinc-400`}
+                      >
+                        {online ? "Online" : "Offline"}
+                      </p>
                     </div>
-                  )}
-
-                  <div className="text-left">
-                    <h1 className="text-sm font-medium text-zinc-700 capitalize dark:text-white">
-                      {user.username}
-                    </h1>
-                    <p className={`text-xs ${online ? "text-green-500" : "text-zinc-500"} dark:text-zinc-400`}>
-                      {online ? "Online" : "Offline"}
-                    </p>
-                  </div>
-                </button>
-              );
-            })}
+                  </button>
+                );
+              })}
           </div>
         </div>
 

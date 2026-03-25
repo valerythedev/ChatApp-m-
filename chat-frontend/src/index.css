@@ -1,0 +1,87 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* Terminal chat theme (Chat page) */
+.chat-terminal {
+  --t-bg: #f4f4f0;
+  --t-sidebar: #e8e8e4;
+  --t-input: #deded8;
+  --t-primary: #1a1a1a;
+  --t-secondary: #4a4a44;
+  --t-muted: #909088;
+  --t-border: #c8c8c0;
+  --t-msg-self: #deded8;
+  --t-msg-other: #ecece8;
+  --t-danger: #c04040;
+  --t-online: #3a6a3a;
+}
+
+html.dark .chat-terminal {
+  --t-bg: #1a1a1a;
+  --t-sidebar: #222222;
+  --t-input: #2a2a2a;
+  --t-primary: #e8e8e0;
+  --t-secondary: #a0a09a;
+  --t-muted: #606060;
+  --t-border: #333333;
+  --t-msg-self: #2a2a2a;
+  --t-msg-other: #1e1e1e;
+  --t-danger: #c45c5c;
+  --t-online: #5a8a5a;
+}
+
+.chat-terminal-input:focus-within .chat-terminal-caret {
+  visibility: visible;
+}
+
+.chat-terminal-input .chat-terminal-caret {
+  visibility: hidden;
+}
+
+@keyframes chat-terminal-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+.chat-terminal-caret {
+  animation: chat-terminal-blink 1s step-end infinite;
+}
+
+/* Auth (login / signup) — shared field style */
+.chat-terminal .auth-field {
+  margin-top: 0.5rem;
+  display: block;
+  width: 100%;
+  border: 1px solid var(--t-border);
+  background: var(--t-input);
+  padding: 0.5rem 0.75rem;
+  font-family: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Monaco, Consolas, monospace;
+  font-size: 0.875rem;
+  line-height: 1.4;
+  color: var(--t-primary);
+}
+
+.chat-terminal .auth-field::placeholder {
+  color: var(--t-muted);
+}
+
+.chat-terminal .auth-field:focus {
+  outline: none;
+  border-color: var(--t-muted);
+}

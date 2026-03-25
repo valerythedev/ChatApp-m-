@@ -7,6 +7,7 @@ const connectToMongoDb = async () => {
     console.log("🔌 Intentando conectar a MongoDB...");
 
     const uri = process.env.MONGO_DB_URI;
+    console.log("testing mongoURI", uri)
     if (!uri) {
       throw new Error("❌ MONGO_DB_URI no está definido en el .env");
     }
