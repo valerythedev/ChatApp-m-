@@ -41,15 +41,69 @@ html.dark .chat-terminal {
   --t-online: #5a8a5a;
 }
 
-.chat-terminal-input:focus-within .chat-terminal-caret {
-  visibility: visible;
+/* Compose: mirror + overlay input (CLI-style block cursor) */
+.terminal-compose-wrapper {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  min-height: 1.5rem;
+  overflow: hidden;
 }
 
-.chat-terminal-input .chat-terminal-caret {
-  visibility: hidden;
+.terminal-compose-real-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: transparent;
+  caret-color: transparent;
+  outline: none;
+  font: inherit;
+  letter-spacing: inherit;
+  line-height: inherit;
+  z-index: 2;
+  white-space: pre-wrap;
+  word-break: break-word;
+  resize: none;
+  box-sizing: border-box;
+  overflow-y: auto;
 }
 
-@keyframes chat-terminal-blink {
+.terminal-compose-mirror {
+  display: block;
+  width: 100%;
+  color: var(--t-primary);
+  font: inherit;
+  letter-spacing: inherit;
+  line-height: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+  pointer-events: none;
+  z-index: 1;
+  box-sizing: border-box;
+}
+
+.terminal-compose-cursor {
+  display: inline-block;
+  animation: terminal-compose-blink 1s step-end infinite;
+}
+
+.terminal-compose-cursor-no-blink {
+  animation: none;
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .terminal-compose-cursor {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+@keyframes terminal-compose-blink {
   0%,
   100% {
     opacity: 1;
@@ -59,8 +113,59 @@ html.dark .chat-terminal {
   }
 }
 
-.chat-terminal-caret {
-  animation: chat-terminal-blink 1s step-end infinite;
+@keyframes typed-text-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+.typed-text-caret {
+  animation: typed-text-blink 1s step-end infinite;
+}
+
+/* Peer typing strip — below thread, above compose (not inside overflow scroll) */
+.typing-indicator {
+  font-family: inherit;
+  color: var(--t-muted);
+  font-size: 0.75rem;
+  letter-spacing: 0.1em;
+  padding: 6px 0 2px 0;
+  min-height: 1.2rem;
+}
+
+.typing-cursor {
+  animation: typing-indicator-blink 1s step-end infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .typing-cursor {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+@keyframes typing-indicator-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+/* Chat main compose row — Send stays bottom-aligned when message wraps */
+.chat-input-bar {
+  display: flex;
+  align-items: flex-end;
+  width: 100%;
+  gap: 8px;
+  padding: 8px;
+  box-sizing: border-box;
 }
 
 /* Auth (login / signup) — shared field style */

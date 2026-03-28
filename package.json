@@ -6,6 +6,9 @@
   "scripts": {
     "dev:backend": "npm run dev --prefix chat-backend",
     "dev:frontend": "npm run dev --prefix chat-frontend",
+    "build:backend": "npm run build --prefix chat-backend",
+    "build:frontend": "npm run build --prefix chat-frontend",
+    "build": "npm run build:backend && npm run build:frontend",
     "test": "echo \"No root tests\" && exit 0"
   },
   "license": "ISC"

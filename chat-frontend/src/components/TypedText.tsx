@@ -65,7 +65,7 @@ export function TypedText({
       {visible}
       {!done && (
         <span
-          className="chat-terminal-caret ml-px inline-block w-[0.55ch] translate-y-px text-[var(--t-primary)]"
+          className="typed-text-caret ml-px inline-block w-[0.55ch] translate-y-px text-[var(--t-primary)]"
           aria-hidden
         >
           █

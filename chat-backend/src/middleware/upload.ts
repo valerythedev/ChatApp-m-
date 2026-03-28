@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Request } from "express";
 import multer from "multer";
+import { isSupabaseStorageConfigured } from "../lib/supabase.js";
 
 const ALLOWED_MIME = new Set([
   "image/jpeg",
@@ -30,7 +31,7 @@ function maxBytes(): number {
   return (Number.isFinite(mb) ? mb : 10) * 1024 * 1024;
 }
 
-const storage = multer.diskStorage({
+const diskStorage = multer.diskStorage({
   destination: (_req, _file, cb) => {
     ensureUploadDir();
     cb(null, UPLOAD_DIR);
@@ -41,6 +42,8 @@ const storage = multer.diskStorage({
     cb(null, `${unique}${ext}`);
   },
 });
+
+const storage = isSupabaseStorageConfigured() ? multer.memoryStorage() : diskStorage;
 
 function fileFilter(
   _req: Request,

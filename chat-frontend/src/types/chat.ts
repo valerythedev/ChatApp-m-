@@ -39,10 +39,23 @@ export interface InboxConversation {
   otherUsers: UserPublic[];
   lastMessage: ChatMessage | null;
   updatedAt: string;
+  unreadCount: number;
 }
 
 export interface ArchivedConversationRow {
   id: string;
   archivedAt: string | null;
   updatedAt: string;
+  unreadCount: number;
 }
+
+export interface ContactRequestItem {
+  id: string;
+  createdAt: string;
+  from?: UserPublic;
+  to?: UserPublic;
+}
+
+export type SendContactRequestResult =
+  | { status: "pending"; request: { id: string; to: UserPublic } }
+  | { status: "connected"; user: UserPublic };

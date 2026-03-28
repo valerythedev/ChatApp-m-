@@ -16,13 +16,30 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  sentMessages      Message[]          @relation("SentMessages")
-  conversationUsers ConversationUser[]
-  contactsOwned     UserContact[]      @relation("ContactOwner")
-  contactsOf        UserContact[]      @relation("ContactPeer")
+  sentMessages             Message[]          @relation("SentMessages")
+  conversationUsers        ConversationUser[]
+  contactsOwned            UserContact[]      @relation("ContactOwner")
+  contactsOf               UserContact[]      @relation("ContactPeer")
+  sentContactRequests      ContactRequest[]   @relation("SentContactRequests")
+  receivedContactRequests  ContactRequest[]   @relation("ReceivedContactRequests")
 }
 
-/// People you added; only these users appear in People and can receive your new messages.
+/// Pending invite from `fromId` to `toId`. Deleted when accepted, rejected, or cancelled.
+model ContactRequest {
+  id        String   @id @default(uuid())
+  fromId    String
+  toId      String
+  createdAt DateTime @default(now())
+
+  from User @relation("SentContactRequests", fields: [fromId], references: [id], onDelete: Cascade)
+  to   User @relation("ReceivedContactRequests", fields: [toId], references: [id], onDelete: Cascade)
+
+  @@unique([fromId, toId])
+  @@index([toId])
+  @@index([fromId])
+}
+
+/// Accepted connection edge: messaging requires BOTH (A→B) and (B→A) rows.
 model UserContact {
   ownerId   String
   contactId String

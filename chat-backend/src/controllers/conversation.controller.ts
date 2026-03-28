@@ -77,7 +77,23 @@ export async function listArchived(req: Request, res: Response): Promise<void> {
       orderBy: { archivedAt: "desc" },
       select: { id: true, archivedAt: true, updatedAt: true },
     });
-    res.status(200).json(rows);
+    const withUnread = await Promise.all(
+      rows.map(async (row) => {
+        const unreadCount = await prisma.message.count({
+          where: {
+            conversationId: row.id,
+            isDeleted: false,
+            senderId: { not: userId },
+            readAt: null,
+          },
+        });
+        return {
+          ...row,
+          unreadCount,
+        };
+      })
+    );
+    res.status(200).json(withUnread);
   } catch (error) {
     console.error("listArchived error:", error);
     res.status(500).json({ error: "Failed to list archived conversations." });

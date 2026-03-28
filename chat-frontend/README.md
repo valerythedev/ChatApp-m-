@@ -35,4 +35,4 @@ npm run preview   # Preview production build
 
 ## Production
 
-Build static assets with `npm run build` and serve `dist/` behind your CDN or static host. Point `VITE_API_ORIGIN` at your deployed API and ensure CORS + cookie/socket settings match.
+Set **`VITE_API_ORIGIN`** (and optional **`VITE_SOCKET_ORIGIN`**) to your **public API URL** before building — Vite embeds them at compile time (`export` them in the shell or use `.env.production`). Then `npm run build` and serve **`dist/`** from any static host. The backend’s **`FRONTEND_ORIGIN`** must list your SPA’s exact public origin so CORS and Socket.IO succeed.

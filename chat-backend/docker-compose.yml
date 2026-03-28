@@ -23,10 +23,12 @@ services:
       postgres:
         condition: service_healthy
     environment:
+      NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       JWT_SECRET: ${JWT_SECRET}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:5173}
       PORT: ${PORT:-5550}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-10}
     ports:
       - "${PORT:-5550}:5550"
     volumes:

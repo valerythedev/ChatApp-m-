@@ -5,7 +5,9 @@ function required(name: string, value: string | undefined): string {
   return value;
 }
 
-const apiOrigin = required("VITE_API_ORIGIN", import.meta.env.VITE_API_ORIGIN).replace(/\/$/, "");
+const apiOriginRaw =
+  import.meta.env.VITE_API_URL ?? import.meta.env.VITE_API_ORIGIN;
+const apiOrigin = required("VITE_API_URL (or VITE_API_ORIGIN for local)", apiOriginRaw).replace(/\/$/, "");
 const socketOrigin = (import.meta.env.VITE_SOCKET_ORIGIN ?? apiOrigin).replace(/\/$/, "");
 
 export const appConfig = {

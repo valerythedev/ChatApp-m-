@@ -2,7 +2,9 @@ import { appConfig } from "@/config";
 import type {
   ArchivedConversationRow,
   ChatMessage,
+  ContactRequestItem,
   InboxConversation,
+  SendContactRequestResult,
   UserPublic,
 } from "@/types/chat";
 
@@ -75,6 +77,19 @@ export async function loginRequest(username: string, password: string): Promise<
   });
 }
 
+/** Restore session when `token` exists but `user` was never saved (legacy clients). */
+export async function fetchMe(): Promise<UserPublic> {
+  const res = await apiFetch<{ user: { id: string; username: string } }>("/api/auth/me");
+  const u = res.user;
+  return {
+    id: u.id,
+    _id: u.id,
+    username: u.username,
+    profilePic: "",
+    avatarUrl: null,
+  };
+}
+
 export async function signupRequest(payload: {
   fullName?: string;
   username: string;
@@ -90,16 +105,42 @@ export async function signupRequest(payload: {
   });
 }
 
-/** Your contact list (People tab). Not every user on the app. */
+/** Mutual contacts only (both accepted). */
 export async function fetchUsers(): Promise<UserPublic[]> {
   return apiFetch("/api/auth/users");
 }
 
-export async function addContactRequest(username: string): Promise<UserPublic> {
-  return apiFetch("/api/auth/contacts", {
+export async function sendContactRequest(username: string): Promise<SendContactRequestResult> {
+  return apiFetch("/api/auth/contacts/request", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username }),
+  });
+}
+
+export async function fetchIncomingContactRequests(): Promise<ContactRequestItem[]> {
+  return apiFetch("/api/auth/contacts/requests/incoming");
+}
+
+export async function fetchOutgoingContactRequests(): Promise<ContactRequestItem[]> {
+  return apiFetch("/api/auth/contacts/requests/outgoing");
+}
+
+export async function acceptContactRequestApi(requestId: string): Promise<{ user: UserPublic }> {
+  return apiFetch(`/api/auth/contacts/requests/${encodeURIComponent(requestId)}/accept`, {
+    method: "POST",
+  });
+}
+
+export async function rejectContactRequestApi(requestId: string): Promise<{ ok: boolean }> {
+  return apiFetch(`/api/auth/contacts/requests/${encodeURIComponent(requestId)}/reject`, {
+    method: "POST",
+  });
+}
+
+export async function cancelContactRequestApi(requestId: string): Promise<{ ok: boolean }> {
+  return apiFetch(`/api/auth/contacts/requests/${encodeURIComponent(requestId)}`, {
+    method: "DELETE",
   });
 }
 

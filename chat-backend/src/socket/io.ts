@@ -5,13 +5,6 @@ import { findOrCreateDmConversation, getDmConversation } from "../lib/conversati
 import { toClientMessage } from "../lib/serialize.js";
 import * as presence from "./presence.js";
 
-async function resetSenderReadState(conversationId: string, senderId: string, exceptMessageId: string) {
-  await prisma.message.updateMany({
-    where: { conversationId, senderId, id: { not: exceptMessageId }, isDeleted: false },
-    data: { readAt: null },
-  });
-}
-
 export function registerSocketHandlers(io: Server): void {
   io.on("connection", (socket) => {
     socket.on("join", (user: { id: string; username: string }) => {
@@ -41,8 +34,6 @@ export function registerSocketHandlers(io: Server): void {
           where: { id: conversation.id },
           data: { updatedAt: new Date() },
         });
-
-        await resetSenderReadState(conversation.id, msg.from, saved.id);
 
         const peer = await prisma.user.findUnique({
           where: { id: msg.to },

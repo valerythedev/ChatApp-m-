@@ -1,6 +1,9 @@
 import type { Request, Response } from "express";
+import fs from "node:fs/promises";
 import bcrypt from "bcryptjs";
 import { prisma } from "../lib/prisma.js";
+import { isSupabaseStorageConfigured, uploadFile } from "../lib/supabase.js";
+import { isMutualContact } from "../lib/contacts.js";
 import generateToken from "../utils/generateToken.js";
 import { toPublicUser } from "../lib/serialize.js";
 
@@ -9,7 +12,7 @@ function syntheticEmail(username: string): string {
   return `${safe}@users.local`;
 }
 
-/** People you added — same shape as before; `GET /api/auth/users` kept for the client. */
+/** Mutual contacts only — `GET /api/auth/users`. */
 export async function listContacts(req: Request, res: Response): Promise<void> {
   try {
     const currentUserId = req.user?.id;
@@ -24,14 +27,22 @@ export async function listContacts(req: Request, res: Response): Promise<void> {
       },
       orderBy: { createdAt: "asc" },
     });
-    res.status(200).json(rows.map((r) => toPublicUser(r.contact)));
+
+    const mutual: typeof rows = [];
+    for (const r of rows) {
+      if (await isMutualContact(currentUserId, r.contactId)) {
+        mutual.push(r);
+      }
+    }
+
+    res.status(200).json(mutual.map((r) => toPublicUser(r.contact)));
   } catch (error) {
     console.error("listContacts error:", error);
     res.status(500).json({ error: "Failed to fetch contacts." });
   }
 }
 
-export async function addContact(req: Request, res: Response): Promise<void> {
+export async function sendContactRequest(req: Request, res: Response): Promise<void> {
   try {
     const ownerId = req.user?.id;
     if (!ownerId) {
@@ -45,36 +56,215 @@ export async function addContact(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const contact = await prisma.user.findUnique({
+    const target = await prisma.user.findUnique({
       where: { username },
       select: { id: true, username: true, avatarUrl: true },
     });
-    if (!contact) {
+    if (!target) {
       res.status(404).json({ error: "User not found." });
       return;
     }
-    if (contact.id === ownerId) {
+    if (target.id === ownerId) {
       res.status(400).json({ error: "You cannot add yourself." });
       return;
     }
 
-    try {
-      await prisma.userContact.create({
-        data: { ownerId, contactId: contact.id },
-      });
-    } catch (e: unknown) {
-      const code = typeof e === "object" && e && "code" in e ? (e as { code: string }).code : "";
-      if (code === "P2002") {
-        res.status(409).json({ error: "Already in your contacts." });
-        return;
-      }
-      throw e;
+    if (await isMutualContact(ownerId, target.id)) {
+      res.status(409).json({ error: "You are already connected with this person." });
+      return;
     }
 
-    res.status(201).json(toPublicUser(contact));
+    const reversePending = await prisma.contactRequest.findUnique({
+      where: { fromId_toId: { fromId: target.id, toId: ownerId } },
+    });
+    if (reversePending) {
+      await prisma.$transaction([
+        prisma.contactRequest.delete({ where: { id: reversePending.id } }),
+        prisma.userContact.upsert({
+          where: { ownerId_contactId: { ownerId, contactId: target.id } },
+          create: { ownerId, contactId: target.id },
+          update: {},
+        }),
+        prisma.userContact.upsert({
+          where: { ownerId_contactId: { ownerId: target.id, contactId: ownerId } },
+          create: { ownerId: target.id, contactId: ownerId },
+          update: {},
+        }),
+      ]);
+      res.status(201).json({ status: "connected", user: toPublicUser(target) });
+      return;
+    }
+
+    const existing = await prisma.contactRequest.findUnique({
+      where: { fromId_toId: { fromId: ownerId, toId: target.id } },
+    });
+    if (existing) {
+      res.status(409).json({ error: "Request already sent. Wait for them to accept." });
+      return;
+    }
+
+    const row = await prisma.contactRequest.create({
+      data: { fromId: ownerId, toId: target.id },
+    });
+    res.status(201).json({
+      status: "pending",
+      request: { id: row.id, to: toPublicUser(target) },
+    });
   } catch (error) {
-    console.error("addContact error:", error);
-    res.status(500).json({ error: "Failed to add contact." });
+    console.error("sendContactRequest error:", error);
+    res.status(500).json({ error: "Failed to send request." });
+  }
+}
+
+export async function listIncomingContactRequests(req: Request, res: Response): Promise<void> {
+  try {
+    const me = req.user?.id;
+    if (!me) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+    const rows = await prisma.contactRequest.findMany({
+      where: { toId: me },
+      include: { from: { select: { id: true, username: true, avatarUrl: true } } },
+      orderBy: { createdAt: "desc" },
+    });
+    res.status(200).json(
+      rows.map((r) => ({
+        id: r.id,
+        createdAt: r.createdAt.toISOString(),
+        from: toPublicUser(r.from),
+      })),
+    );
+  } catch (error) {
+    console.error("listIncomingContactRequests error:", error);
+    res.status(500).json({ error: "Failed to load requests." });
+  }
+}
+
+export async function listOutgoingContactRequests(req: Request, res: Response): Promise<void> {
+  try {
+    const me = req.user?.id;
+    if (!me) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+    const rows = await prisma.contactRequest.findMany({
+      where: { fromId: me },
+      include: { to: { select: { id: true, username: true, avatarUrl: true } } },
+      orderBy: { createdAt: "desc" },
+    });
+    res.status(200).json(
+      rows.map((r) => ({
+        id: r.id,
+        createdAt: r.createdAt.toISOString(),
+        to: toPublicUser(r.to),
+      })),
+    );
+  } catch (error) {
+    console.error("listOutgoingContactRequests error:", error);
+    res.status(500).json({ error: "Failed to load requests." });
+  }
+}
+
+export async function acceptContactRequest(req: Request, res: Response): Promise<void> {
+  try {
+    const me = req.user?.id;
+    if (!me) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+    const requestId = typeof req.params.requestId === "string" ? req.params.requestId.trim() : "";
+    if (!requestId) {
+      res.status(400).json({ error: "requestId is required." });
+      return;
+    }
+
+    const row = await prisma.contactRequest.findUnique({ where: { id: requestId } });
+    if (!row || row.toId !== me) {
+      res.status(404).json({ error: "Request not found." });
+      return;
+    }
+
+    await prisma.$transaction([
+      prisma.contactRequest.delete({ where: { id: requestId } }),
+      prisma.userContact.upsert({
+        where: { ownerId_contactId: { ownerId: row.fromId, contactId: row.toId } },
+        create: { ownerId: row.fromId, contactId: row.toId },
+        update: {},
+      }),
+      prisma.userContact.upsert({
+        where: { ownerId_contactId: { ownerId: row.toId, contactId: row.fromId } },
+        create: { ownerId: row.toId, contactId: row.fromId },
+        update: {},
+      }),
+    ]);
+
+    const fromUser = await prisma.user.findUnique({
+      where: { id: row.fromId },
+      select: { id: true, username: true, avatarUrl: true },
+    });
+    if (!fromUser) {
+      res.status(500).json({ error: "User missing." });
+      return;
+    }
+    res.status(200).json({ user: toPublicUser(fromUser) });
+  } catch (error) {
+    console.error("acceptContactRequest error:", error);
+    res.status(500).json({ error: "Failed to accept request." });
+  }
+}
+
+export async function rejectContactRequest(req: Request, res: Response): Promise<void> {
+  try {
+    const me = req.user?.id;
+    if (!me) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+    const requestId = typeof req.params.requestId === "string" ? req.params.requestId.trim() : "";
+    if (!requestId) {
+      res.status(400).json({ error: "requestId is required." });
+      return;
+    }
+
+    const row = await prisma.contactRequest.findUnique({ where: { id: requestId } });
+    if (!row || row.toId !== me) {
+      res.status(404).json({ error: "Request not found." });
+      return;
+    }
+
+    await prisma.contactRequest.delete({ where: { id: requestId } });
+    res.status(200).json({ ok: true });
+  } catch (error) {
+    console.error("rejectContactRequest error:", error);
+    res.status(500).json({ error: "Failed to reject request." });
+  }
+}
+
+export async function cancelContactRequest(req: Request, res: Response): Promise<void> {
+  try {
+    const me = req.user?.id;
+    if (!me) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+    const requestId = typeof req.params.requestId === "string" ? req.params.requestId.trim() : "";
+    if (!requestId) {
+      res.status(400).json({ error: "requestId is required." });
+      return;
+    }
+
+    const row = await prisma.contactRequest.findUnique({ where: { id: requestId } });
+    if (!row || row.fromId !== me) {
+      res.status(404).json({ error: "Request not found." });
+      return;
+    }
+
+    await prisma.contactRequest.delete({ where: { id: requestId } });
+    res.status(200).json({ ok: true });
+  } catch (error) {
+    console.error("cancelContactRequest error:", error);
+    res.status(500).json({ error: "Failed to cancel request." });
   }
 }
 
@@ -91,10 +281,11 @@ export async function removeContact(req: Request, res: Response): Promise<void> 
       return;
     }
 
-    const result = await prisma.userContact.deleteMany({
-      where: { ownerId, contactId },
-    });
-    if (result.count === 0) {
+    const [r1, r2] = await prisma.$transaction([
+      prisma.userContact.deleteMany({ where: { ownerId, contactId } }),
+      prisma.userContact.deleteMany({ where: { ownerId: contactId, contactId: ownerId } }),
+    ]);
+    if (r1.count === 0 && r2.count === 0) {
       res.status(404).json({ error: "Contact not found." });
       return;
     }
@@ -225,10 +416,16 @@ export async function updateAvatar(req: Request, res: Response): Promise<void> {
       res.status(400).json({ error: "Avatar must be an image." });
       return;
     }
-    const publicPath = `/uploads/${file.filename}`;
+    let avatarUrl: string;
+    if (isSupabaseStorageConfigured()) {
+      const buffer = file.buffer ?? (await fs.readFile(file.path));
+      avatarUrl = await uploadFile("avatars", userId, buffer, file.mimetype);
+    } else {
+      avatarUrl = `/uploads/${file.filename}`;
+    }
     const updated = await prisma.user.update({
       where: { id: userId },
-      data: { avatarUrl: publicPath },
+      data: { avatarUrl },
       select: { id: true, username: true, avatarUrl: true },
     });
     res.status(200).json(toPublicUser(updated));

@@ -1,4 +1,5 @@
-import { useEffect, useId, useRef } from "react";
+import { Paperclip } from "lucide-react";
+import { useId, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
 
 type ComposeInputProps = {
   value: string;
@@ -19,15 +20,29 @@ export function ComposeInput({
   onPickFile,
   fileMultiple = true,
 }: ComposeInputProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
   const fileId = useId();
-  const wch = Math.min(Math.max(value.length, placeholder.length, 8) + 1, 96);
+  const inputId = useId();
+  const typingTimeout = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  useEffect(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    el.style.width = `${wch}ch`;
-  }, [wch]);
+  const [isFocused, setIsFocused] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
+
+  const handleChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
+    onChange(e.target.value);
+    setIsTyping(true);
+    clearTimeout(typingTimeout.current);
+    typingTimeout.current = setTimeout(() => setIsTyping(false), 500);
+  };
+
+  const shouldBlink = isFocused && !isTyping && !disabled;
+  const showCursor = isFocused && !disabled;
+
+  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      e.currentTarget.form?.requestSubmit();
+    }
+  };
 
   return (
     <div className="chat-terminal-input flex min-h-10 items-stretch border border-[var(--t-border)] bg-[var(--t-input)]">
@@ -42,37 +57,52 @@ export function ComposeInput({
       />
       <label
         htmlFor={fileId}
-        className="flex shrink-0 cursor-pointer items-center justify-center border-r border-[var(--t-border)] bg-transparent px-2.5 font-mono text-xs text-[var(--t-secondary)] hover:text-[var(--t-primary)]"
+        className="flex shrink-0 cursor-pointer items-center justify-center border-r border-[var(--t-border)] bg-transparent px-2.5 text-[var(--t-secondary)] hover:text-[var(--t-primary)]"
         title="Attach files"
       >
-        [^]
+        <span className="sr-only">Attach files</span>
+        <Paperclip className="h-4 w-4" strokeWidth={1.75} aria-hidden />
       </label>
       <label
-        className="flex min-w-0 flex-1 cursor-text items-center gap-1 px-2.5 py-2 font-mono text-sm"
-        htmlFor="chat-msg-input"
+        htmlFor={inputId}
+        className="flex min-w-0 flex-1 cursor-text items-start gap-1 px-2.5 py-2 font-mono text-sm leading-normal"
       >
-        <span className="shrink-0 text-[var(--t-secondary)]" aria-hidden>
+        <span className="mt-0.5 shrink-0 text-[var(--t-secondary)]" aria-hidden>
           &gt;
         </span>
-        <span className="inline-flex min-w-0 max-w-full items-center overflow-x-auto">
-          <input
-            ref={inputRef}
-            id="chat-msg-input"
-            type="text"
+        <div className="terminal-compose-wrapper min-w-0 flex-1">
+          <span className="terminal-compose-mirror">
+            {value}
+            {showCursor ? (
+              <span
+                className={
+                  shouldBlink ? "terminal-compose-cursor" : "terminal-compose-cursor terminal-compose-cursor-no-blink"
+                }
+                aria-hidden
+              >
+                █
+              </span>
+            ) : null}
+          </span>
+          <textarea
+            id={inputId}
             autoComplete="off"
             spellCheck={false}
             disabled={disabled}
-            className="min-w-0 shrink-0 border-0 bg-transparent p-0 font-mono text-[var(--t-primary)] outline-none"
-            style={{ width: `${wch}ch`, caretColor: "transparent" }}
-            placeholder={placeholder}
+            className="terminal-compose-real-input"
             value={value}
-            onChange={(e) => onChange(e.target.value)}
-            aria-label="Message"
+            rows={1}
+            onChange={handleChange}
+            onKeyDown={onKeyDown}
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => {
+              setIsFocused(false);
+              setIsTyping(false);
+              clearTimeout(typingTimeout.current);
+            }}
+            aria-label={placeholder}
           />
-          <span className="chat-terminal-caret shrink-0 font-mono text-[var(--t-primary)]" aria-hidden>
-            █
-          </span>
-        </span>
+        </div>
       </label>
     </div>
   );

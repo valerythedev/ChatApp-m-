@@ -1,18 +1,13 @@
 import type { Request, Response } from "express";
+import fs from "node:fs/promises";
 import { prisma } from "../lib/prisma.js";
+import { isSupabaseStorageConfigured, uploadFile } from "../lib/supabase.js";
 import { findOrCreateDmConversation, getDmConversation } from "../lib/conversation.js";
-import { canSendDirectMessage } from "../lib/contacts.js";
+import { canSendDirectMessage, isMutualContact, listMutualContactIds } from "../lib/contacts.js";
 import { toClientMessage, toPublicUser } from "../lib/serialize.js";
 import { paramString } from "../lib/routeParams.js";
 import { getIoInstance } from "../socket/instance.js";
 import { getSocketIdByUserId } from "../socket/presence.js";
-
-async function resetSenderReadState(conversationId: string, senderId: string, exceptMessageId: string) {
-  await prisma.message.updateMany({
-    where: { conversationId, senderId, id: { not: exceptMessageId }, isDeleted: false },
-    data: { readAt: null },
-  });
-}
 
 export async function getConversationMeta(req: Request, res: Response): Promise<void> {
   try {
@@ -24,6 +19,10 @@ export async function getConversationMeta(req: Request, res: Response): Promise<
     const otherUserId = paramString(req.params.userId);
     if (!otherUserId) {
       res.status(400).json({ error: "userId is required." });
+      return;
+    }
+    if (!(await isMutualContact(userId, otherUserId))) {
+      res.status(200).json({ conversationId: null });
       return;
     }
     const conv = await getDmConversation(userId, otherUserId);
@@ -57,7 +56,7 @@ export async function sendMessage(req: Request, res: Response): Promise<void> {
     if (!(await canSendDirectMessage(senderId, receiverId))) {
       res.status(403).json({
         error:
-          "Add this person to your contacts to start a chat, or reply from an existing conversation.",
+          "You can only message people you are connected with. Send a contact request and wait until they accept (or accept theirs).",
       });
       return;
     }
@@ -68,9 +67,11 @@ export async function sendMessage(req: Request, res: Response): Promise<void> {
     let mediaType: string | null = null;
     let fileName: string | null = null;
     if (file) {
-      mediaUrl = `/uploads/${file.filename}`;
       mediaType = file.mimetype;
       fileName = file.originalname;
+      if (!isSupabaseStorageConfigured()) {
+        mediaUrl = `/uploads/${file.filename}`;
+      }
     }
 
     const newMessage = await prisma.message.create({
@@ -85,19 +86,33 @@ export async function sendMessage(req: Request, res: Response): Promise<void> {
       include: { sender: { select: { id: true, username: true, avatarUrl: true } } },
     });
 
+    let messageForClient = newMessage;
+    if (file && isSupabaseStorageConfigured()) {
+      const buffer = file.buffer ?? (await fs.readFile(file.path));
+      const bucket = file.mimetype === "application/pdf" ? "message-files" : "message-media";
+      const publicUrl = await uploadFile(bucket, newMessage.id, buffer, file.mimetype);
+      await prisma.message.update({
+        where: { id: newMessage.id },
+        data: { mediaUrl: publicUrl },
+      });
+      const refreshed = await prisma.message.findUnique({
+        where: { id: newMessage.id },
+        include: { sender: { select: { id: true, username: true, avatarUrl: true } } },
+      });
+      if (refreshed) messageForClient = refreshed;
+    }
+
     await prisma.conversation.update({
       where: { id: conversation.id },
       data: { updatedAt: new Date() },
     });
-
-    await resetSenderReadState(conversation.id, senderId, newMessage.id);
 
     const peer = await prisma.user.findUnique({
       where: { id: receiverId },
       select: { username: true },
     });
 
-    const payload = toClientMessage(newMessage, senderId, receiverId, peer?.username ?? "");
+    const payload = toClientMessage(messageForClient, senderId, receiverId, peer?.username ?? "");
 
     const io = getIoInstance();
     const recvSocket = getSocketIdByUserId(receiverId);
@@ -157,6 +172,7 @@ export async function getInbox(req: Request, res: Response): Promise<void> {
       return {
         _id: c.id,
         id: c.id,
+        conversationId: c.id,
         participants,
         otherUsers: others.map(toPublicUser),
         lastMessage: last
@@ -166,7 +182,29 @@ export async function getInbox(req: Request, res: Response): Promise<void> {
       };
     });
 
-    res.status(200).json(payload);
+    const allowedPeerIds = new Set(await listMutualContactIds(userId));
+    const filtered = payload.filter((p) => {
+      const other = p.otherUsers[0];
+      return other && allowedPeerIds.has(other.id);
+    });
+    const withUnread = await Promise.all(
+      filtered.map(async (row) => {
+        const unreadCount = await prisma.message.count({
+          where: {
+            conversationId: row.conversationId,
+            isDeleted: false,
+            senderId: { not: userId },
+            readAt: null,
+          },
+        });
+        return {
+          ...row,
+          unreadCount,
+        };
+      })
+    );
+
+    res.status(200).json(withUnread.map(({ conversationId: _ignore, ...rest }) => rest));
   } catch (error) {
     console.error("getInbox error:", error);
     res.status(500).json({ error: "Failed to fetch inbox." });
@@ -183,6 +221,11 @@ export async function getMessages(req: Request, res: Response): Promise<void> {
     const otherUserId = paramString(req.params.userId);
     if (!otherUserId) {
       res.status(400).json({ error: "userId is required." });
+      return;
+    }
+
+    if (!(await isMutualContact(currentUserId, otherUserId))) {
+      res.status(403).json({ error: "You are not connected with this user. Accept a contact request first." });
       return;
     }
 

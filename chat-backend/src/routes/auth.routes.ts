@@ -4,7 +4,12 @@ import {
   login,
   logout,
   listContacts,
-  addContact,
+  sendContactRequest,
+  listIncomingContactRequests,
+  listOutgoingContactRequests,
+  acceptContactRequest,
+  rejectContactRequest,
+  cancelContactRequest,
   removeContact,
   updateAvatar,
 } from "../controllers/auth.controller.js";
@@ -17,7 +22,12 @@ router.post("/signup", signup);
 router.post("/login", login);
 router.post("/logout", logout);
 router.get("/users", verifyToken, listContacts);
-router.post("/contacts", verifyToken, addContact);
+router.post("/contacts/request", verifyToken, sendContactRequest);
+router.get("/contacts/requests/incoming", verifyToken, listIncomingContactRequests);
+router.get("/contacts/requests/outgoing", verifyToken, listOutgoingContactRequests);
+router.post("/contacts/requests/:requestId/accept", verifyToken, acceptContactRequest);
+router.post("/contacts/requests/:requestId/reject", verifyToken, rejectContactRequest);
+router.delete("/contacts/requests/:requestId", verifyToken, cancelContactRequest);
 router.delete("/contacts/:contactId", verifyToken, removeContact);
 router.patch("/me/avatar", verifyToken, uploadMiddleware.single("avatar"), updateAvatar);
 

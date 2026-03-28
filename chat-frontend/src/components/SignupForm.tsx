@@ -26,6 +26,7 @@ export function SignupForm() {
       });
       const data = await loginRequest(username, password);
       localStorage.setItem("token", data.token);
+      localStorage.setItem("user", JSON.stringify(data.user));
       navigate("/chat", { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Signup failed");

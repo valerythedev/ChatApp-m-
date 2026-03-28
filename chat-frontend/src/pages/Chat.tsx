@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { differenceInHours, format } from "date-fns";
-import { Loader2 } from "lucide-react";
+import { Loader2, Mic, Square } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ComposeInput } from "@/components/chat/ComposeInput";
@@ -9,16 +9,23 @@ import { MessageMedia } from "@/components/MessageMedia";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { getSocket } from "@/socket";
 import {
-  addContactRequest,
+  acceptContactRequestApi,
   archiveConversationRequest,
   assertFileAllowed,
+  cancelContactRequestApi,
   deleteMessageRequest,
   fetchArchivedConversations,
+  fetchIncomingContactRequests,
   fetchInbox,
   fetchMessages,
+  fetchMe,
+  fetchOutgoingContactRequests,
   fetchUsers,
+  markThreadRead,
+  rejectContactRequestApi,
   removeContactRequest,
   restoreConversationRequest,
+  sendContactRequest,
   sendMessageRequest,
   uploadAvatarRequest,
   mediaUrlToAbsolute,
@@ -26,6 +33,13 @@ import {
 import type { ChatMessage, InboxConversation, UserPublic } from "@/types/chat";
 
 type SidebarTab = "chats" | "people" | "archived";
+
+type IncomingMessageAlert = {
+  id: string;
+  fromId: string;
+  sender: string;
+  preview: string;
+};
 
 function avatarSrc(u: Pick<UserPublic, "profilePic" | "avatarUrl">): string | null {
   return mediaUrlToAbsolute(u.profilePic || u.avatarUrl || null);
@@ -69,12 +83,15 @@ function Chat() {
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("chats");
   const [input, setInput] = useState("");
-  const [isTyping, setIsTyping] = useState<string | false>(false);
+  const [peerIsTyping, setPeerIsTyping] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState<Array<{ id: string; username: string; socketId: string }>>([]);
+  const [messageAlerts, setMessageAlerts] = useState<IncomingMessageAlert[]>([]);
   const [menuForMessageId, setMenuForMessageId] = useState<string | null>(null);
   const [addContactUsername, setAddContactUsername] = useState("");
   const selectedPeerRef = useRef<UserPublic | null>(null);
   selectedPeerRef.current = selectedPeer;
+  const selectedPeerIdRef = useRef<string | null>(null);
+  selectedPeerIdRef.current = selectedPeer?.id ?? null;
   const [recording, setRecording] = useState<MediaRecorder | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -88,6 +105,27 @@ function Chat() {
       navigate("/login", { replace: true });
     }
   }, [navigate]);
+
+  useEffect(() => {
+    if (user) return;
+    if (!localStorage.getItem("token")) return;
+    let cancelled = false;
+    void fetchMe()
+      .then((u) => {
+        if (cancelled) return;
+        localStorage.setItem("user", JSON.stringify(u));
+        setUser(u);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        localStorage.removeItem("token");
+        localStorage.removeItem("user");
+        navigate("/login", { replace: true });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user, navigate]);
 
   useEffect(() => {
     if (!user) return;
@@ -110,6 +148,18 @@ function Chat() {
     enabled: Boolean(user),
   });
 
+  const incomingRequestsQuery = useQuery({
+    queryKey: ["contactRequests", "incoming"],
+    queryFn: fetchIncomingContactRequests,
+    enabled: Boolean(user),
+  });
+
+  const outgoingRequestsQuery = useQuery({
+    queryKey: ["contactRequests", "outgoing"],
+    queryFn: fetchOutgoingContactRequests,
+    enabled: Boolean(user),
+  });
+
   const inboxQuery = useQuery({
     queryKey: ["inbox"],
     queryFn: fetchInbox,
@@ -128,6 +178,19 @@ function Chat() {
     enabled: Boolean(user && selectedPeer),
   });
 
+  // Strong read-sync: when opening a thread, explicitly mark read via HTTP.
+  useEffect(() => {
+    if (!user || !selectedPeer) return;
+    if (document.visibilityState !== "visible") return;
+    void markThreadRead(selectedPeer.id)
+      .then(() => {
+        void qc.invalidateQueries({ queryKey: ["messages", selectedPeer.id] });
+        void qc.invalidateQueries({ queryKey: ["inbox"] });
+        void qc.invalidateQueries({ queryKey: ["archived"] });
+      })
+      .catch(() => undefined);
+  }, [user, selectedPeer?.id, messagesQuery.data?.length, qc]);
+
   const emitMarkRead = useCallback(() => {
     if (!user || !selectedPeer) return;
     if (document.visibilityState !== "visible") return;
@@ -144,29 +207,61 @@ function Chat() {
   }, [emitMarkRead]);
 
   useEffect(() => {
+    setPeerIsTyping(false);
+    if (typingTimer.current) {
+      clearTimeout(typingTimer.current);
+      typingTimer.current = null;
+    }
+  }, [selectedPeer?.id]);
+
+  useEffect(() => {
     const socket = getSocket();
     const onRecv = (msg: ChatMessage) => {
       const other = String(msg.from) === userId ? msg.to : msg.from;
       void qc.invalidateQueries({ queryKey: ["messages", other] });
       void qc.invalidateQueries({ queryKey: ["inbox"] });
+
+      if (String(msg.from) === String(userId)) return;
+      const activeThread = selectedPeer?.id && String(selectedPeer.id) === String(msg.from);
+      const shouldNotify = !activeThread || document.visibilityState !== "visible";
+      if (!shouldNotify) return;
+
+      const preview = msg.text?.trim() || "[attachment]";
+      setMessageAlerts((prev) => [
+        ...prev,
+        {
+          id: String(msg._id),
+          fromId: String(msg.from),
+          sender: msg.sender?.trim() || "user",
+          preview: preview.length > 160 ? `${preview.slice(0, 157)}…` : preview,
+        },
+      ]);
     };
     const onSent = (msg: ChatMessage) => {
       const other = String(msg.from) === userId ? msg.to : msg.from;
       void qc.invalidateQueries({ queryKey: ["messages", other] });
       void qc.invalidateQueries({ queryKey: ["inbox"] });
     };
-    const onTyping = (who: { username?: string }) => {
-      if (who.username && who.username !== user?.username) {
-        setIsTyping(`${who.username} is typing…`);
-        if (typingTimer.current) clearTimeout(typingTimer.current);
-        typingTimer.current = setTimeout(() => setIsTyping(false), 2500);
+    const onTyping = (who: { id?: string; username?: string }) => {
+      const openId = selectedPeerIdRef.current;
+      if (import.meta.env.DEV) {
+        console.log("[typing] socket event", who, "openThread", openId);
       }
+      if (!who?.id || !who.username || !openId) return;
+      if (String(who.id) !== String(openId)) return;
+      setPeerIsTyping(true);
+      if (typingTimer.current) clearTimeout(typingTimer.current);
+      typingTimer.current = setTimeout(() => setPeerIsTyping(false), 2500);
     };
     const onRead = () => {
       void qc.invalidateQueries({ queryKey: ["messages", selectedPeer?.id] });
+      void qc.invalidateQueries({ queryKey: ["inbox"] });
+      void qc.invalidateQueries({ queryKey: ["archived"] });
     };
     const onReceipt = () => {
       void qc.invalidateQueries({ queryKey: ["messages"] });
+      void qc.invalidateQueries({ queryKey: ["inbox"] });
+      void qc.invalidateQueries({ queryKey: ["archived"] });
     };
     socket.on("receiveMessage", onRecv);
     socket.on("messageSent", onSent);
@@ -180,7 +275,7 @@ function Chat() {
       socket.off("messagesRead", onRead);
       socket.off("readReceiptUpdated", onReceipt);
     };
-  }, [qc, user?.username, userId, selectedPeer?.id]);
+  }, [qc, userId, selectedPeer?.id]);
 
   useEffect(() => {
     if (!selectedPeer || !input) return;
@@ -263,16 +358,58 @@ function Chat() {
   const inboxPeerIds = useMemo(() => new Set(inboxPeers.map((p) => p.peer.id)), [inboxPeers]);
 
   const contacts = usersQuery.data ?? [];
+  const incomingRequestCount = (incomingRequestsQuery.data ?? []).length;
+  const chatsUnreadMessages = inboxPeers.reduce((sum, row) => sum + (row.conversation.unreadCount ?? 0), 0);
+  const archivedUnreadMessages = (archivedQuery.data ?? []).reduce((sum, row) => sum + (row.unreadCount ?? 0), 0);
+  const chatsUnreadThreads = inboxPeers.filter((row) => (row.conversation.unreadCount ?? 0) > 0).length;
+  const archivedUnreadThreads = (archivedQuery.data ?? []).filter((row) => (row.unreadCount ?? 0) > 0).length;
+  const unreadMessagesCount = chatsUnreadMessages + archivedUnreadMessages;
+
+  useEffect(() => {
+    const titleBase = "Tiny Chat";
+    document.title = unreadMessagesCount > 0 ? `(${unreadMessagesCount}) ${titleBase}` : titleBase;
+    return () => {
+      document.title = titleBase;
+    };
+  }, [unreadMessagesCount]);
 
   const peopleWithoutChat = useMemo(() => {
     return contacts.filter((u) => !inboxPeerIds.has(u.id) && u.id !== userId);
   }, [contacts, inboxPeerIds, userId]);
 
   const addContactMutation = useMutation({
-    mutationFn: (username: string) => addContactRequest(username),
-    onSuccess: () => {
+    mutationFn: (username: string) => sendContactRequest(username),
+    onSuccess: (data) => {
       setAddContactUsername("");
+      void qc.invalidateQueries({ queryKey: ["contactRequests", "incoming"] });
+      void qc.invalidateQueries({ queryKey: ["contactRequests", "outgoing"] });
+      if (data.status === "connected") {
+        void qc.invalidateQueries({ queryKey: ["users"] });
+        void qc.invalidateQueries({ queryKey: ["inbox"] });
+      }
+    },
+  });
+
+  const acceptRequestMutation = useMutation({
+    mutationFn: (requestId: string) => acceptContactRequestApi(requestId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["contactRequests", "incoming"] });
       void qc.invalidateQueries({ queryKey: ["users"] });
+      void qc.invalidateQueries({ queryKey: ["inbox"] });
+    },
+  });
+
+  const rejectRequestMutation = useMutation({
+    mutationFn: (requestId: string) => rejectContactRequestApi(requestId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["contactRequests", "incoming"] });
+    },
+  });
+
+  const cancelRequestMutation = useMutation({
+    mutationFn: (requestId: string) => cancelContactRequestApi(requestId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["contactRequests", "outgoing"] });
     },
   });
 
@@ -346,6 +483,42 @@ function Chat() {
   const isOnline = (id: string) => onlineUsers.some((u) => u.id === id);
 
   const messages = messagesQuery.data ?? [];
+  const mobileThreadOpen = Boolean(selectedPeer);
+
+  const topMessageAlert = messageAlerts[0];
+  const moreAlertCount = messageAlerts.length > 1 ? messageAlerts.length - 1 : 0;
+
+  const consumeTopMessageAlert = () => {
+    setMessageAlerts((a) => a.slice(1));
+  };
+
+  const openTopMessageAlert = () => {
+    const alert = messageAlerts[0];
+    if (!alert) return;
+    const inboxHit = inboxPeers.find((p) => p.peer.id === alert.fromId);
+    const contactHit = contacts.find((c) => c.id === alert.fromId);
+    const peer: UserPublic =
+      inboxHit?.peer ??
+      contactHit ?? {
+        id: alert.fromId,
+        _id: alert.fromId,
+        username: alert.sender,
+        profilePic: "",
+        avatarUrl: null,
+      };
+    setSelectedPeer(peer);
+    setSelectedConversationId(inboxHit?.conversation.id ?? null);
+    setSidebarTab("chats");
+    consumeTopMessageAlert();
+  };
+
+  useEffect(() => {
+    if (!topMessageAlert) return;
+    const t = window.setTimeout(() => {
+      consumeTopMessageAlert();
+    }, 4200);
+    return () => clearTimeout(t);
+  }, [topMessageAlert?.id]);
 
   if (!user) {
     return (
@@ -357,7 +530,9 @@ function Chat() {
 
   return (
     <div className="chat-terminal flex h-screen max-h-screen overflow-hidden bg-[var(--t-bg)] font-mono text-[var(--t-primary)]">
-      <aside className="flex w-full min-h-0 shrink-0 flex-col border-b border-[var(--t-border)] md:h-screen md:w-[280px] md:border-b-0 md:border-r">
+      <aside
+        className={`${mobileThreadOpen ? "hidden" : "flex"} w-full min-h-0 shrink-0 flex-col border-b border-[var(--t-border)] md:flex md:h-screen md:w-[280px] md:border-b-0 md:border-r`}
+      >
         <header className="flex items-start gap-2 border-b border-[var(--t-border)] px-3 py-3">
           <button
             type="button"
@@ -400,22 +575,27 @@ function Chat() {
         <nav className="flex flex-wrap gap-1 border-b border-[var(--t-border)] px-2 py-2" aria-label="Inbox sections">
           {(
             [
-              ["chats", "[ Chats ]"],
-              ["people", "People"],
-              ["archived", "Archived"],
+              ["chats", "[ Chats ]", chatsUnreadThreads],
+              ["people", "People", incomingRequestCount],
+              ["archived", "Archived", archivedUnreadThreads],
             ] as const
-          ).map(([key, label]) => (
+          ).map(([key, label, count]) => (
             <button
               key={key}
               type="button"
               onClick={() => setSidebarTab(key)}
-              className={`px-2 py-1 text-xs ${
+              className={`inline-flex items-center gap-1 px-2 py-1 text-xs ${
                 sidebarTab === key
                   ? "border border-[var(--t-border)] bg-[var(--t-bg)] text-[var(--t-primary)]"
                   : "text-[var(--t-secondary)] hover:text-[var(--t-primary)]"
               }`}
             >
               {label}
+              {count > 0 ? (
+                <span className="min-w-[1.1rem] border border-[var(--t-border)] px-1 text-[10px] leading-4 text-[var(--t-primary)]">
+                  {count}
+                </span>
+              ) : null}
             </button>
           ))}
         </nav>
@@ -429,7 +609,7 @@ function Chat() {
                 <p className="p-3 text-sm text-[var(--t-danger)]">Could not load inbox.</p>
               ) : inboxPeers.length === 0 ? (
                 <p className="p-3 text-sm text-[var(--t-muted)]">
-                  No conversations yet. Add a contact in People, then open a thread.
+                  No conversations yet. In People, send a request and wait until they accept — then open a thread here.
                 </p>
               ) : (
                 <ul className="list-none p-0">
@@ -473,6 +653,11 @@ function Chat() {
                               &gt; last: {preview || "—"}
                             </p>
                           </div>
+                          {conversation.unreadCount > 0 ? (
+                            <span className="shrink-0 border border-[var(--t-border)] px-1.5 text-[10px] text-[var(--t-primary)]">
+                              {conversation.unreadCount}
+                            </span>
+                          ) : null}
                           <span className="shrink-0 text-[11px] text-[var(--t-muted)]">[A]</span>
                         </button>
                       </SwipeRow>
@@ -485,14 +670,84 @@ function Chat() {
 
           {sidebarTab === "people" ? (
             <>
-              {usersQuery.isLoading ? (
-                <p className="p-3 text-sm text-[var(--t-muted)]">Loading contacts…</p>
-              ) : usersQuery.isError ? (
-                <p className="p-3 text-sm text-[var(--t-danger)]">Could not load contacts.</p>
+              {usersQuery.isLoading || incomingRequestsQuery.isLoading || outgoingRequestsQuery.isLoading ? (
+                <p className="p-3 text-sm text-[var(--t-muted)]">Loading people…</p>
+              ) : usersQuery.isError || incomingRequestsQuery.isError || outgoingRequestsQuery.isError ? (
+                <p className="p-3 text-sm text-[var(--t-danger)]">Could not load people or requests.</p>
               ) : (
                 <>
                   <div className="border-b border-[var(--t-border)] p-3">
-                    <p className="mb-2 text-[11px] text-[var(--t-muted)]">&gt; add by username</p>
+                    <p className="mb-2 text-[11px] font-normal text-[var(--t-muted)]">
+                      &gt; requests — accept to connect (both of you can chat)
+                    </p>
+                    {(incomingRequestsQuery.data ?? []).length === 0 ? (
+                      <p className="text-xs text-[var(--t-muted)]">No incoming requests.</p>
+                    ) : (
+                      <ul className="mt-2 space-y-2">
+                        {(incomingRequestsQuery.data ?? []).map((req) => {
+                          const peer = req.from!;
+                          return (
+                            <li
+                              key={req.id}
+                              className="flex flex-wrap items-center gap-2 border border-[var(--t-border)] bg-[var(--t-bg)] px-2 py-2"
+                            >
+                              <span className="min-w-0 flex-1 truncate text-sm">@{peer.username}</span>
+                              <button
+                                type="button"
+                                className="border border-[var(--t-border)] bg-[var(--t-input)] px-2 py-1 text-xs text-[var(--t-primary)] disabled:opacity-50"
+                                disabled={acceptRequestMutation.isPending || rejectRequestMutation.isPending}
+                                onClick={() => acceptRequestMutation.mutate(req.id)}
+                              >
+                                [Accept]
+                              </button>
+                              <button
+                                type="button"
+                                className="border border-[var(--t-border)] px-2 py-1 text-xs text-[var(--t-muted)] disabled:opacity-50"
+                                disabled={acceptRequestMutation.isPending || rejectRequestMutation.isPending}
+                                onClick={() => rejectRequestMutation.mutate(req.id)}
+                              >
+                                [Decline]
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </div>
+
+                  <div className="border-b border-[var(--t-border)] p-3">
+                    <p className="mb-2 text-[11px] text-[var(--t-muted)]">&gt; waiting on them</p>
+                    {(outgoingRequestsQuery.data ?? []).length === 0 ? (
+                      <p className="text-xs text-[var(--t-muted)]">No outgoing requests.</p>
+                    ) : (
+                      <ul className="mt-2 space-y-2">
+                        {(outgoingRequestsQuery.data ?? []).map((req) => {
+                          const peer = req.to!;
+                          return (
+                            <li
+                              key={req.id}
+                              className="flex flex-wrap items-center gap-2 border border-[var(--t-border)] bg-[var(--t-bg)] px-2 py-2"
+                            >
+                              <span className="min-w-0 flex-1 truncate text-sm text-[var(--t-secondary)]">
+                                @{peer.username} <span className="text-[var(--t-muted)]">… pending</span>
+                              </span>
+                              <button
+                                type="button"
+                                className="border border-[var(--t-border)] px-2 py-1 text-xs text-[var(--t-muted)] disabled:opacity-50"
+                                disabled={cancelRequestMutation.isPending}
+                                onClick={() => cancelRequestMutation.mutate(req.id)}
+                              >
+                                [Cancel]
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </div>
+
+                  <div className="border-b border-[var(--t-border)] p-3">
+                    <p className="mb-2 text-[11px] text-[var(--t-muted)]">&gt; send request by username</p>
                     <form
                       className="flex gap-2"
                       onSubmit={(e) => {
@@ -513,9 +768,9 @@ function Chat() {
                         type="submit"
                         disabled={addContactMutation.isPending || !addContactUsername.trim()}
                         className="shrink-0 border border-[var(--t-border)] bg-[var(--t-sidebar)] px-3 py-1.5 font-mono text-xs text-[var(--t-primary)] hover:border-[var(--t-muted)] disabled:opacity-50"
-                        title="Add contact"
+                        title="Send contact request"
                       >
-                        [+]
+                        [→]
                       </button>
                     </form>
                     {addContactMutation.isError ? (
@@ -524,13 +779,18 @@ function Chat() {
                       </p>
                     ) : null}
                   </div>
+
+                  <div className="p-3 pb-0">
+                    <p className="text-[11px] text-[var(--t-muted)]">&gt; your connections</p>
+                  </div>
                   {contacts.length === 0 ? (
                     <p className="p-3 text-sm text-[var(--t-muted)]">
-                      No contacts yet. Add someone you know by their exact username.
+                      No mutual connections yet. Accept a request above, or send one — if they already sent you one, yours
+                      connects you instantly.
                     </p>
                   ) : peopleWithoutChat.length === 0 ? (
                     <p className="p-3 text-sm text-[var(--t-muted)]">
-                      Everyone in your contacts is already in Chats.
+                      Everyone you are connected with is already in your Chats list.
                     </p>
                   ) : (
                     <ul className="space-y-0">
@@ -562,7 +822,7 @@ function Chat() {
                           </button>
                           <button
                             type="button"
-                            title="Remove from contacts"
+                            title="Remove connection"
                             disabled={removeContactMutation.isPending}
                             className="shrink-0 border-l border-[var(--t-border)] px-2.5 font-mono text-xs text-[var(--t-muted)] hover:bg-[var(--t-bg)] hover:text-[var(--t-danger)] disabled:opacity-50"
                             onClick={() => removeContactMutation.mutate(peer.id)}
@@ -593,9 +853,16 @@ function Chat() {
                       key={row.id}
                       className="flex items-center justify-between gap-2 border border-[var(--t-border)] px-2 py-2"
                     >
-                      <span className="truncate text-xs text-[var(--t-muted)]">
-                        #<span className="font-mono">{row.id.slice(0, 8)}…</span>
-                      </span>
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="truncate text-xs text-[var(--t-muted)]">
+                          #<span className="font-mono">{row.id.slice(0, 8)}…</span>
+                        </span>
+                        {row.unreadCount > 0 ? (
+                          <span className="shrink-0 border border-[var(--t-border)] px-1.5 text-[10px] text-[var(--t-primary)]">
+                            {row.unreadCount}
+                          </span>
+                        ) : null}
+                      </div>
                       <button
                         type="button"
                         className="border border-[var(--t-border)] bg-[var(--t-input)] px-2 py-1 text-xs text-[var(--t-primary)]"
@@ -629,9 +896,22 @@ function Chat() {
         </footer>
       </aside>
 
-      <main className="flex min-h-0 flex-1 flex-col md:min-h-screen">
+      <main className={`${mobileThreadOpen ? "flex" : "hidden"} min-h-0 flex-1 flex-col md:flex md:min-h-screen`}>
         <header className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--t-border)] bg-[var(--t-sidebar)] px-4 py-3">
-          <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
+            {selectedPeer ? (
+              <button
+                type="button"
+                className="border border-[var(--t-border)] px-3 py-1.5 text-base leading-none md:hidden"
+                onClick={() => {
+                  setSelectedPeer(null);
+                  setSelectedConversationId(null);
+                }}
+                title="Back"
+              >
+                [←]
+              </button>
+            ) : null}
             {selectedPeer ? (
               <h1 className="truncate text-sm font-normal">
                 <strong># {selectedPeer.username}</strong> — direct
@@ -674,7 +954,7 @@ function Chat() {
             ) : messages.length === 0 ? (
               <p className="text-center text-sm text-[var(--t-muted)]">No messages yet. Say hello.</p>
             ) : (
-              messages.map((msg, idx) => {
+              messages.map((msg) => {
                 const mine = String(msg.from) === String(userId);
                 const time =
                   msg.timestamp && !Number.isNaN(new Date(msg.timestamp).getTime())
@@ -690,7 +970,6 @@ function Chat() {
                     }}
                   >
                     <div
-                      ref={idx === messages.length - 1 ? scrollRef : undefined}
                       className={`max-w-[min(100%,28rem)] border border-[var(--t-border)] px-3 py-2 text-sm break-words ${
                         mine ? "bg-[var(--t-msg-self)]" : "bg-[var(--t-msg-other)]"
                       } `}
@@ -716,7 +995,21 @@ function Chat() {
                 );
               })
             )}
-            {isTyping ? <p className="text-sm italic text-[var(--t-secondary)]">{isTyping}</p> : null}
+            {selectedPeer && !messagesQuery.isLoading && !messagesQuery.isError ? (
+              <div ref={scrollRef} className="h-px w-full shrink-0 scroll-mt-4" aria-hidden />
+            ) : null}
+          </div>
+
+          <div
+            className="relative z-10 flex min-h-[1.2rem] shrink-0 items-end justify-start bg-[var(--t-sidebar)] px-4"
+            aria-live="polite"
+          >
+            {peerIsTyping ? (
+              <div className="typing-indicator">
+                <span className="typing-label">[ writing ]</span>
+                <span className="typing-cursor"> █</span>
+              </div>
+            ) : null}
           </div>
 
           {menuForMessageId ? (
@@ -754,7 +1047,7 @@ function Chat() {
 
           <form
             onSubmit={handleSend}
-            className="flex shrink-0 flex-wrap items-end gap-2 border-t border-[var(--t-border)] bg-[var(--t-sidebar)] p-3"
+            className="chat-input-bar shrink-0 flex-wrap border-t border-[var(--t-border)] bg-[var(--t-sidebar)]"
           >
             <div className="min-w-0 flex-1">
               <ComposeInput
@@ -769,21 +1062,23 @@ function Chat() {
             {!recording ? (
               <button
                 type="button"
-                className="shrink-0 border border-[var(--t-border)] px-2.5 py-2 font-mono text-xs"
+                className="flex shrink-0 items-center justify-center border border-[var(--t-border)] px-2.5 py-2 text-[var(--t-secondary)] hover:text-[var(--t-primary)] disabled:opacity-50"
                 onClick={() => void startRecording()}
                 disabled={!selectedPeer || sendMutation.isPending}
                 title="Record audio"
               >
-                [m]
+                <span className="sr-only">Record audio</span>
+                <Mic className="h-4 w-4" strokeWidth={1.75} aria-hidden />
               </button>
             ) : (
               <button
                 type="button"
-                className="shrink-0 border border-[var(--t-danger)] px-2.5 py-2 font-mono text-xs text-[var(--t-danger)]"
+                className="flex shrink-0 items-center justify-center border border-[var(--t-danger)] px-2.5 py-2 text-[var(--t-danger)]"
                 onClick={stopRecording}
                 title="Stop recording"
               >
-                [■]
+                <span className="sr-only">Stop recording</span>
+                <Square className="h-4 w-4 fill-current" aria-hidden />
               </button>
             )}
             <button
@@ -796,6 +1091,29 @@ function Chat() {
           </form>
         </div>
       </main>
+
+      {topMessageAlert ? (
+        <div className="pointer-events-none fixed inset-x-0 top-3 z-[60] flex justify-center px-3">
+          <button
+            type="button"
+            className="pointer-events-auto w-full max-w-md border border-[var(--t-border)] bg-[var(--t-sidebar)] px-4 py-3 text-left font-mono shadow-lg"
+            onClick={openTopMessageAlert}
+            title="Open chat"
+          >
+            <p id="in-app-msg-alert-title" className="text-[11px] text-[var(--t-muted)]">
+              &gt; new message
+            </p>
+            <p className="mt-1 text-sm text-[var(--t-primary)]">
+              <span className="text-[var(--t-secondary)]">@</span>
+              {topMessageAlert.sender}
+            </p>
+            <p className="mt-1 truncate text-xs text-[var(--t-secondary)]">{topMessageAlert.preview}</p>
+            {moreAlertCount > 0 ? (
+              <p className="mt-1 text-[10px] text-[var(--t-muted)]">+{moreAlertCount} more</p>
+            ) : null}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
