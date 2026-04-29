@@ -37,7 +37,7 @@ setIoInstance(io);
 registerSocketHandlers(io);
 
 app.use(corsConfig);
-app.options("*", corsConfig);
+app.options("/{*path}", corsConfig);
 app.use(express.json());
 app.use("/uploads", express.static(UPLOAD_DIR));
 
