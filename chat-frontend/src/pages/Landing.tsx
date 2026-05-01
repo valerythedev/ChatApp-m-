@@ -3,8 +3,8 @@ import { Link } from "react-router-dom";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { TypedText } from "@/components/TypedText";
 
-/** ms per character — list types slowly for a terminal feel */
-const FEATURE_TYPE_MS = 72;
+/** ms per character — list types slowly for a terminal feel (~1.75× slower than prior 72ms) */
+const FEATURE_TYPE_MS = 126;
 
 const features = [
   "Direct messages with other users — pick someone from People or open an existing thread.",

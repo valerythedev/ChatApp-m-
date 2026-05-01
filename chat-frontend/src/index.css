@@ -14,15 +14,15 @@ body {
 
 /* Terminal chat theme (Chat page) */
 .chat-terminal {
-  --t-bg: #f4f4f0;
-  --t-sidebar: #e8e8e4;
-  --t-input: #deded8;
-  --t-primary: #1a1a1a;
-  --t-secondary: #4a4a44;
-  --t-muted: #909088;
-  --t-border: #c8c8c0;
-  --t-msg-self: #deded8;
-  --t-msg-other: #ecece8;
+  --t-bg: #f6f1e7;
+  --t-sidebar: #ebe4d6;
+  --t-input: #e3dbd0;
+  --t-primary: #1a1814;
+  --t-secondary: #4f4a42;
+  --t-muted: #8c8578;
+  --t-border: #cfc4b2;
+  --t-msg-self: #e5ddd2;
+  --t-msg-other: #efe8dc;
   --t-danger: #c04040;
   --t-online: #3a6a3a;
 }
