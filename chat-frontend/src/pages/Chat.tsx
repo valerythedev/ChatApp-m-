@@ -978,7 +978,7 @@ function Chat() {
                         <p className="mb-1 text-[11px] text-[var(--t-muted)]">{msg.sender}</p>
                       ) : null}
                       {msg.text ? <p className="whitespace-pre-wrap">{msg.text}</p> : null}
-                      <MessageMedia message={msg} />
+                      <MessageMedia message={msg} fromMe={mine} />
                       <div
                         className={`mt-2 flex flex-wrap gap-2 text-[11px] text-[var(--t-muted)] ${
                           mine ? "justify-end" : "justify-start"
