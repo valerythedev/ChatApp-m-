@@ -4,6 +4,7 @@ import type {
   ChatMessage,
   ContactRequestItem,
   InboxConversation,
+  MessageReactionItem,
   SendContactRequestResult,
   UserPublic,
 } from "@/types/chat";
@@ -179,6 +180,17 @@ export async function sendMessageRequest(form: FormData): Promise<{ data: ChatMe
 
 export async function deleteMessageRequest(messageId: string): Promise<{ ok: boolean }> {
   return apiFetch(`/api/msg/message/${encodeURIComponent(messageId)}`, { method: "DELETE" });
+}
+
+export async function setMessageReactionRequest(
+  messageId: string,
+  reaction: string,
+): Promise<{ ok: boolean; messageId: string; reactions: MessageReactionItem[] }> {
+  return apiFetch(`/api/msg/message/${encodeURIComponent(messageId)}/reaction`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reaction }),
+  });
 }
 
 export async function archiveConversationRequest(conversationId: string): Promise<{ ok: boolean }> {

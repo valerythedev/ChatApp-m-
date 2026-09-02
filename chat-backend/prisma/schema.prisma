@@ -22,6 +22,7 @@ model User {
   contactsOf               UserContact[]      @relation("ContactPeer")
   sentContactRequests      ContactRequest[]   @relation("SentContactRequests")
   receivedContactRequests  ContactRequest[]   @relation("ReceivedContactRequests")
+  messageReactions         MessageReaction[]
 }
 
 /// Pending invite from `fromId` to `toId`. Deleted when accepted, rejected, or cancelled.
@@ -89,4 +90,19 @@ model Message {
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender       User         @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  reactions    MessageReaction[]
+}
+
+model MessageReaction {
+  id        String   @id @default(uuid())
+  messageId String
+  userId    String
+  symbol    String
+  createdAt DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([messageId])
 }

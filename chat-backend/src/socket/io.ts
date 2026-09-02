@@ -27,7 +27,10 @@ export function registerSocketHandlers(io: Server): void {
             senderId: msg.from,
             body: text,
           },
-          include: { sender: { select: { id: true, username: true, avatarUrl: true } } },
+          include: {
+            sender: { select: { id: true, username: true, avatarUrl: true } },
+            reactions: { include: { user: { select: { id: true, username: true } } } },
+          },
         });
 
         await prisma.conversation.update({

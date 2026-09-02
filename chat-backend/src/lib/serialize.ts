@@ -1,4 +1,4 @@
-import type { Message, User } from "../generated/prisma/client.js";
+import type { Message, MessageReaction, User } from "../generated/prisma/client.js";
 
 export function toPublicUser(u: Pick<User, "id" | "username" | "avatarUrl">) {
   return {
@@ -12,6 +12,9 @@ export function toPublicUser(u: Pick<User, "id" | "username" | "avatarUrl">) {
 
 type MessageWithSender = Message & {
   sender: Pick<User, "id" | "username" | "avatarUrl">;
+  reactions?: (Pick<MessageReaction, "symbol" | "userId"> & {
+    user: Pick<User, "id" | "username">;
+  })[];
 };
 
 export function toClientMessage(
@@ -39,5 +42,10 @@ export function toClientMessage(
     mediaUrl: m.mediaUrl,
     mediaType: m.mediaType,
     fileName: m.fileName,
+    reactions: (m.reactions ?? []).map((r) => ({
+      symbol: r.symbol,
+      userId: r.userId,
+      username: r.user.username,
+    })),
   };
 }

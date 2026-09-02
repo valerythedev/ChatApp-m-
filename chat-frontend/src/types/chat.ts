@@ -1,3 +1,9 @@
+export interface MessageReactionItem {
+  symbol: string;
+  userId: string;
+  username: string;
+}
+
 export interface UserPublic {
   id: string;
   _id: string;
@@ -24,6 +30,7 @@ export interface ChatMessage {
   mediaUrl?: string | null;
   mediaType?: string | null;
   fileName?: string | null;
+  reactions?: MessageReactionItem[];
 }
 
 export interface ConversationUser {

@@ -4,10 +4,16 @@ import { prisma } from "../lib/prisma.js";
 import { isSupabaseStorageConfigured, uploadFile } from "../lib/supabase.js";
 import { findOrCreateDmConversation, getDmConversation } from "../lib/conversation.js";
 import { canSendDirectMessage, isMutualContact, listMutualContactIds } from "../lib/contacts.js";
+import { isAllowedReactionSymbol } from "../lib/reactions.js";
 import { toClientMessage, toPublicUser } from "../lib/serialize.js";
 import { paramString } from "../lib/routeParams.js";
 import { getIoInstance } from "../socket/instance.js";
 import { getSocketIdByUserId } from "../socket/presence.js";
+
+const messageInclude = {
+  sender: { select: { id: true, username: true, avatarUrl: true } },
+  reactions: { include: { user: { select: { id: true, username: true } } } },
+} as const;
 
 export async function getConversationMeta(req: Request, res: Response): Promise<void> {
   try {
@@ -83,7 +89,7 @@ export async function sendMessage(req: Request, res: Response): Promise<void> {
         mediaType,
         fileName,
       },
-      include: { sender: { select: { id: true, username: true, avatarUrl: true } } },
+      include: messageInclude,
     });
 
     let messageForClient = newMessage;
@@ -97,7 +103,7 @@ export async function sendMessage(req: Request, res: Response): Promise<void> {
       });
       const refreshed = await prisma.message.findUnique({
         where: { id: newMessage.id },
-        include: { sender: { select: { id: true, username: true, avatarUrl: true } } },
+        include: messageInclude,
       });
       if (refreshed) messageForClient = refreshed;
     }
@@ -158,9 +164,7 @@ export async function getInbox(req: Request, res: Response): Promise<void> {
           where: { isDeleted: false },
           orderBy: { sentAt: "desc" },
           take: 1,
-          include: {
-            sender: { select: { id: true, username: true, avatarUrl: true } },
-          },
+          include: messageInclude,
         },
       },
     });
@@ -243,7 +247,7 @@ export async function getMessages(req: Request, res: Response): Promise<void> {
     const messages = await prisma.message.findMany({
       where: { conversationId: conversation.id, isDeleted: false },
       orderBy: { sentAt: "asc" },
-      include: { sender: { select: { id: true, username: true, avatarUrl: true } } },
+      include: messageInclude,
     });
 
     res.status(200).json(
@@ -299,6 +303,92 @@ export async function markThreadRead(req: Request, res: Response): Promise<void>
   } catch (error) {
     console.error("markThreadRead error:", error);
     res.status(500).json({ error: "Failed to mark messages read." });
+  }
+}
+
+export async function setMessageReaction(req: Request, res: Response): Promise<void> {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ error: "Unauthorized." });
+      return;
+    }
+    const messageId = paramString(req.params.messageId);
+    const { reaction } = req.body as { reaction?: unknown };
+    if (!messageId || typeof reaction !== "string") {
+      res.status(400).json({ error: "messageId and reaction (string) are required." });
+      return;
+    }
+    const sym = reaction.trim();
+    if (!isAllowedReactionSymbol(sym)) {
+      res.status(400).json({ error: "Invalid reaction symbol." });
+      return;
+    }
+
+    const msg = await prisma.message.findFirst({
+      where: { id: messageId, isDeleted: false },
+      include: {
+        conversation: { include: { users: { select: { userId: true } } } },
+      },
+    });
+    if (!msg) {
+      res.status(404).json({ error: "Message not found." });
+      return;
+    }
+    if (!msg.conversation.users.some((u) => u.userId === userId)) {
+      res.status(403).json({ error: "Not a participant in this conversation." });
+      return;
+    }
+
+    const existing = await prisma.messageReaction.findUnique({
+      where: { messageId_userId: { messageId, userId } },
+    });
+
+    if (existing?.symbol === sym) {
+      await prisma.messageReaction.delete({ where: { id: existing.id } });
+    } else if (existing) {
+      await prisma.messageReaction.update({
+        where: { id: existing.id },
+        data: { symbol: sym },
+      });
+    } else {
+      await prisma.messageReaction.create({
+        data: { messageId, userId, symbol: sym },
+      });
+    }
+
+    const rows = await prisma.messageReaction.findMany({
+      where: { messageId },
+      include: { user: { select: { id: true, username: true } } },
+      orderBy: { createdAt: "asc" },
+    });
+    const reactions = rows.map((r) => ({
+      symbol: r.symbol,
+      userId: r.userId,
+      username: r.user.username,
+    }));
+
+    const partnerId = msg.conversation.users.map((u) => u.userId).find((id) => id !== userId);
+    if (!partnerId) {
+      res.status(500).json({ error: "Conversation has no peer." });
+      return;
+    }
+
+    const io = getIoInstance();
+    const payload = { messageId, reactions };
+    const selfSocket = getSocketIdByUserId(userId);
+    const peerSocket = getSocketIdByUserId(partnerId);
+    if (io && selfSocket) {
+      io.to(selfSocket).emit("messageReactions", { ...payload, peerId: partnerId });
+    }
+    if (io && peerSocket) {
+      io.to(peerSocket).emit("messageReactions", { ...payload, peerId: userId });
+    }
+
+    res.status(200).json({ ok: true, messageId, reactions });
+  } catch (error) {
+    console.error("setMessageReaction error:", error);
+    res.status(500).json({ error: "Failed to set reaction." });
   }
 }
 

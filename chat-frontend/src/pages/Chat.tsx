@@ -6,6 +6,7 @@ import { useNavigate } from "react-router-dom";
 import { ComposeInput } from "@/components/chat/ComposeInput";
 import { SwipeRow } from "@/components/chat/SwipeRow";
 import { MessageMedia } from "@/components/MessageMedia";
+import { MessageReactionsRow } from "@/components/MessageReactionsRow";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { getSocket } from "@/socket";
 import {
@@ -27,10 +28,11 @@ import {
   restoreConversationRequest,
   sendContactRequest,
   sendMessageRequest,
+  setMessageReactionRequest,
   uploadAvatarRequest,
   mediaUrlToAbsolute,
 } from "@/services/api";
-import type { ChatMessage, InboxConversation, UserPublic } from "@/types/chat";
+import type { ChatMessage, InboxConversation, MessageReactionItem, UserPublic } from "@/types/chat";
 
 type SidebarTab = "chats" | "people" | "archived";
 
@@ -263,17 +265,29 @@ function Chat() {
       void qc.invalidateQueries({ queryKey: ["inbox"] });
       void qc.invalidateQueries({ queryKey: ["archived"] });
     };
+    const onMessageReactions = (p: { messageId: string; peerId: string; reactions: MessageReactionItem[] }) => {
+      qc.setQueryData<ChatMessage[]>(["messages", p.peerId], (old) => {
+        if (!old) return old;
+        return old.map((m) =>
+          String(m.id) === String(p.messageId) || String(m._id) === String(p.messageId)
+            ? { ...m, reactions: p.reactions }
+            : m,
+        );
+      });
+    };
     socket.on("receiveMessage", onRecv);
     socket.on("messageSent", onSent);
     socket.on("typing", onTyping);
     socket.on("messagesRead", onRead);
     socket.on("readReceiptUpdated", onReceipt);
+    socket.on("messageReactions", onMessageReactions);
     return () => {
       socket.off("receiveMessage", onRecv);
       socket.off("messageSent", onSent);
       socket.off("typing", onTyping);
       socket.off("messagesRead", onRead);
       socket.off("readReceiptUpdated", onReceipt);
+      socket.off("messageReactions", onMessageReactions);
     };
   }, [qc, userId, selectedPeer?.id]);
 
@@ -313,6 +327,25 @@ function Chat() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["messages", selectedPeer?.id] });
       void qc.invalidateQueries({ queryKey: ["inbox"] });
+    },
+  });
+
+  const reactionMutation = useMutation({
+    mutationFn: ({ messageId, reaction }: { messageId: string; reaction: string }) =>
+      setMessageReactionRequest(messageId, reaction),
+    onSuccess: (data, variables) => {
+      const peerId = selectedPeerRef.current?.id;
+      if (!peerId) return;
+      qc.setQueryData<ChatMessage[]>(["messages", peerId], (old) =>
+        old?.map((m) =>
+          String(m._id) === String(variables.messageId) || String(m.id) === String(variables.messageId)
+            ? { ...m, reactions: data.reactions }
+            : m,
+        ),
+      );
+    },
+    onError: (err) => {
+      alert(err instanceof Error ? err.message : "Reaction failed");
     },
   });
 
@@ -979,6 +1012,19 @@ function Chat() {
                       ) : null}
                       {msg.text ? <p className="whitespace-pre-wrap">{msg.text}</p> : null}
                       <MessageMedia message={msg} fromMe={mine} />
+                      {userId ? (
+                        <MessageReactionsRow
+                          message={msg}
+                          currentUserId={userId}
+                          isSending={
+                            reactionMutation.isPending &&
+                            reactionMutation.variables?.messageId === msg._id
+                          }
+                          onPick={(symbol) =>
+                            reactionMutation.mutate({ messageId: msg._id, reaction: symbol })
+                          }
+                        />
+                      ) : null}
                       <div
                         className={`mt-2 flex flex-wrap gap-2 text-[11px] text-[var(--t-muted)] ${
                           mine ? "justify-end" : "justify-start"
