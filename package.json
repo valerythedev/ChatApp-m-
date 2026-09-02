@@ -9,6 +9,7 @@
     "build:backend": "npm run build --prefix chat-backend",
     "build:frontend": "npm run build --prefix chat-frontend",
     "build": "npm run build:backend && npm run build:frontend",
+    "start": "npm start --prefix chat-backend",
     "test": "echo \"No root tests\" && exit 0"
   },
   "license": "ISC"

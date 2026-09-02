@@ -59,6 +59,7 @@ app.use("/api/msg", msgRoutes);
 app.use("/api/conversations", conversationRoutes);
 
 const PORT = Number(process.env.PORT ?? "5550");
+const HOST = process.env.HOST ?? "0.0.0.0";
 
 async function shutdown(signal: string): Promise<void> {
   console.info(`${signal}: closing HTTP server…`);
@@ -75,8 +76,8 @@ async function start(): Promise<void> {
   assertProductionSafeToStart();
   ensureUploadDir();
   await prisma.$connect();
-  server.listen(PORT, () => {
-    console.log(`Server + Socket.IO listening on port ${PORT} (${process.env.NODE_ENV ?? "development"})`);
+  server.listen(PORT, HOST, () => {
+    console.log(`Server + Socket.IO listening on ${HOST}:${PORT} (${process.env.NODE_ENV ?? "development"})`);
     console.log(`Uploads: ${path.resolve(UPLOAD_DIR)}`);
     console.log(`CORS origins: ${allowedOrigins.join(", ")}`);
   });
