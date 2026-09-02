@@ -15,6 +15,30 @@ Copy `.env.example` to `.env` and set values:
 - `NODE_ENV=production` — enforces long `JWT_SECRET` and valid `DATABASE_URL` on boot
 - `TRUST_PROXY` — `1` or `true` behind a reverse proxy (optional `TRUST_PROXY_HOPS`)
 
+## Render (production)
+
+Blueprint: **`render.yaml`** at the **repository root** (`rootDir: chat-backend`). The build must compile TypeScript before start:
+
+```text
+npm install && npm run build && npx prisma migrate deploy
+```
+
+`npm start` runs `node dist/server.js` — without `npm run build`, the service crashes on boot.
+
+**Dashboard checklist**
+
+| Setting | Value |
+|---------|--------|
+| Root Directory | `chat-backend` |
+| Build Command | `npm install && npm run build && npx prisma migrate deploy` |
+| Start Command | `npm start` |
+| Health Check Path | `/health` |
+| `DATABASE_URL` | Linked from Render Postgres (`chat-postgres`) |
+| `JWT_SECRET` | At least **32 characters** (required when `NODE_ENV=production`) |
+| `FRONTEND_URL` | Your Vercel URL, no trailing slash (e.g. `https://your-app.vercel.app`) |
+
+Verify after deploy: `curl https://YOUR-SERVICE.onrender.com/health` → `{"ok":true,...}`.
+
 ## Local development (Postgres required)
 
 ```bash

@@ -1,9 +1,9 @@
+# Render Blueprint — repo root (monorepo). Service code lives in chat-backend/.
 services:
   - type: web
     name: chat-backend
     runtime: node
-    # When using the repo-root render.yaml Blueprint, rootDir is set there.
-    # If this file is the only Blueprint, set Root Directory to chat-backend in the Render dashboard.
+    rootDir: chat-backend
     buildCommand: npm install && npm run build && npx prisma migrate deploy
     startCommand: npm start
     healthCheckPath: /health
