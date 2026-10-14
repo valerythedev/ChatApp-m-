@@ -6,7 +6,7 @@ import { useNavigate } from "react-router-dom";
 import { ComposeInput } from "@/components/chat/ComposeInput";
 import { SwipeRow } from "@/components/chat/SwipeRow";
 import { MessageMedia } from "@/components/MessageMedia";
-import { MessageReactionsRow } from "@/components/MessageReactionsRow";
+import { MessageReactionBadges, MessageReactionMenu } from "@/components/MessageReactionsRow";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { getSocket } from "@/socket";
 import {
@@ -89,6 +89,14 @@ function Chat() {
   const [onlineUsers, setOnlineUsers] = useState<Array<{ id: string; username: string; socketId: string }>>([]);
   const [messageAlerts, setMessageAlerts] = useState<IncomingMessageAlert[]>([]);
   const [menuForMessageId, setMenuForMessageId] = useState<string | null>(null);
+  const [reactionMenu, setReactionMenu] = useState<{
+    messageId: string;
+    top: number;
+    left: number;
+    right: number;
+    bottom: number;
+    width: number;
+  } | null>(null);
   const [addContactUsername, setAddContactUsername] = useState("");
   const selectedPeerRef = useRef<UserPublic | null>(null);
   selectedPeerRef.current = selectedPeer;
@@ -101,6 +109,10 @@ function Chat() {
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const userId = user?.id ?? "";
+
+  useEffect(() => {
+    setReactionMenu(null);
+  }, [selectedPeer?.id]);
 
   useEffect(() => {
     if (!localStorage.getItem("token")) {
@@ -997,34 +1009,29 @@ function Chat() {
                   <div
                     key={msg._id}
                     className={`relative flex w-full ${mine ? "justify-end" : "justify-start"}`}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      if (mine) setMenuForMessageId(msg._id);
-                    }}
                   >
                     <div
-                      className={`max-w-[min(100%,28rem)] border border-[var(--t-border)] px-3 py-2 text-sm break-words ${
+                      className={`relative max-w-[min(100%,28rem)] cursor-context-menu border border-[var(--t-border)] px-3 py-2 text-sm break-words ${
                         mine ? "bg-[var(--t-msg-self)]" : "bg-[var(--t-msg-other)]"
-                      } `}
+                      }`}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        setReactionMenu({
+                          messageId: msg._id,
+                          top: rect.top,
+                          left: rect.left,
+                          right: rect.right,
+                          bottom: rect.bottom,
+                          width: rect.width,
+                        });
+                      }}
                     >
                       {!mine ? (
                         <p className="mb-1 text-[11px] text-[var(--t-muted)]">{msg.sender}</p>
                       ) : null}
                       {msg.text ? <p className="whitespace-pre-wrap">{msg.text}</p> : null}
                       <MessageMedia message={msg} fromMe={mine} />
-                      {userId ? (
-                        <MessageReactionsRow
-                          message={msg}
-                          currentUserId={userId}
-                          isSending={
-                            reactionMutation.isPending &&
-                            reactionMutation.variables?.messageId === msg._id
-                          }
-                          onPick={(symbol) =>
-                            reactionMutation.mutate({ messageId: msg._id, reaction: symbol })
-                          }
-                        />
-                      ) : null}
                       <div
                         className={`mt-2 flex flex-wrap gap-2 text-[11px] text-[var(--t-muted)] ${
                           mine ? "justify-end" : "justify-start"
@@ -1036,7 +1043,33 @@ function Chat() {
                           <span>{time}</span>
                         ) : null}
                       </div>
+                      <MessageReactionBadges message={msg} mine={mine} />
                     </div>
+                    {userId && reactionMenu?.messageId === msg._id ? (
+                      <MessageReactionMenu
+                        message={msg}
+                        currentUserId={userId}
+                        mine={mine}
+                        anchor={reactionMenu}
+                        isSending={
+                          reactionMutation.isPending &&
+                          reactionMutation.variables?.messageId === msg._id
+                        }
+                        onPick={(symbol) => {
+                          reactionMutation.mutate({ messageId: msg._id, reaction: symbol });
+                          setReactionMenu(null);
+                        }}
+                        onDelete={
+                          mine
+                            ? () => {
+                                setMenuForMessageId(msg._id);
+                                setReactionMenu(null);
+                              }
+                            : undefined
+                        }
+                        onClose={() => setReactionMenu(null)}
+                      />
+                    ) : null}
                   </div>
                 );
               })
